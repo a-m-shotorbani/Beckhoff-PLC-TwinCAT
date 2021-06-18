@@ -1,0 +1,201 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.6">
+  <POU Name="FB_myFileRead" Id="{08e729e3-48ef-4fd8-93cb-57c79c54cb6b}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_myFileRead
+VAR_INPUT
+        sSrcNetId               : T_AmsNetId;(* TwinCAT network address of the source file *)
+        sSrcPathName            : T_MaxString;(* Source file path and name *)
+        //sDestNetId              : T_AmsNetId;(* TwinCAT network address of the destination file *)
+        //sDestPathName           : T_MaxString; (* Destination file path and name *)
+        bExecute                : BOOL; (* Rising edge start fb execution *)
+        tTimeOut                : TIME := DEFAULT_ADS_TIMEOUT;(* Max. ADS timeout time *)
+END_VAR
+VAR_OUTPUT
+        bBusy                   :BOOL;(* TRUE => File copy execution in progress, FALSE => File copy execution idle *)
+ 		bError                  :BOOL;(* TRUE => Error, FALSE => No error *)
+ 		nErrId                  :UDINT;(* Error code *)
+
+        hSrcFile                :UINT   := 0;(* File handle of the source file *)
+ 		//hDestFile              :UINT   := 0;(* File handle of the destination file *)
+		readDataOutput			:ARRAY[1..1000] OF BYTE;
+		readDataDone			: BOOL:=FALSE;
+
+END_VAR
+VAR
+        fbFileOpen              :FB_FileOpen;
+        fbFileClose             :FB_FileClose;
+        fbFileRead              :FB_FileRead;
+        fbFileWrite             :FB_FileWrite;
+
+        Step                    :DWORD;
+        RisingEdge              :R_TRIG;
+
+        buffRead                :ARRAY[1..1000] OF BYTE;(* Buffer *)
+		buffReadCounter			: INT;
+		myBuffRead              :ARRAY[1..1000] OF BYTE;(* Buffer *)
+		
+		cbReadLength            :UDINT := 0;
+	fileReadReached: BOOL;
+	fileReadReached5: BOOL;
+	fileReadReached6: BOOL;
+	fileReadReached40: BOOL;
+	fileReadReached41: BOOL;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[RisingEdge(CLK:=bExecute);
+
+CASE Step OF
+        0:      (* Idle state *)
+         IF RisingEdge.Q THEN
+                        bBusy := TRUE;
+                        bError:= FALSE;
+                        nErrId:=0;
+                        Step := 1;
+                        cbReadLength:=0;
+                        hSrcFile:=0;
+                        //hDestFile:=0;
+                END_IF
+
+        1:      (* Open source file *)
+         fbFileOpen( bExecute := FALSE );
+                fbFileOpen( sNetId := sSrcNetId, sPathName := sSrcPathName,
+                        nMode := FOPEN_MODEREAD OR FOPEN_MODEBINARY,
+                        ePath := PATH_GENERIC, tTimeout := tTimeOut, bExecute := TRUE );
+                Step := Step + 1;
+        2:
+                fbFileOpen( bExecute := FALSE );
+                IF NOT fbFileOpen.bBusy THEN
+                        IF fbFileOpen.bError THEN
+                                nErrId := fbFileOpen.nErrId;
+                                bError := TRUE;
+                                Step := 50;
+                        ELSE
+                                hSrcFile := fbFileOpen.hFile;
+                                Step := Step + 1;
+                        END_IF
+                END_IF
+
+        3:      (* Open destination file *)
+			Step := Step + 1;
+			
+        4:
+			Step := Step + 1;
+
+        5:      (* Read data from source file *)
+         cbReadLength := 0;
+                fbFileRead( bExecute:= FALSE );
+                fbFileRead( sNetId:=sSrcNetId, hFile:=hSrcFile,
+                        pReadBuff:= ADR(buffRead), cbReadLen:= SIZEOF(buffRead),
+                        bExecute:=TRUE, tTimeout:=tTimeOut );
+                Step := Step + 1;
+				fileReadReached5:=TRUE;
+				
+				FOR buffReadCounter:=1 TO 1000 BY 1 DO
+					IF buffRead[buffReadCounter]>0 THEN
+						myBuffRead[buffReadCounter]:=buffRead[buffReadCounter];
+					END_IF
+				END_FOR
+	
+        6:
+                fbFileRead( bExecute:= FALSE );
+                IF NOT fbFileRead.bBusy THEN
+					readDataOutput:=buffRead;		///////////////////////////////////////////////////////////////
+                        IF fbFileRead.bError THEN
+                                nErrId := fbFileRead.nErrId;
+                                bError := TRUE;
+                                Step := 50;
+                        ELSE
+                                cbReadLength := fbFileRead.cbRead;
+                                Step := Step + 1;
+                        END_IF
+                END_IF
+				fileReadReached6:=TRUE;
+				
+
+ 
+
+        7:      (* Write data to destination file *)
+		Step := Step + 1;
+
+        8:
+                        	IF fbFileRead.bEOF THEN (* Check if the EOF flag ist set *)
+                            	Step := 50;(* Cleanup: close the destination and source files *)
+									ELSE
+											Step := 5; (* Repeat reading/writing *)
+							END_IF
+
+
+        30:     (* Close the destination file *)
+		Step := 50;
+
+        40: (* Close source file *)
+         fbFileClose( bExecute := FALSE );
+                fbFileClose( sNetId:=sSrcNetId, hFile:=hSrcFile, bExecute:=TRUE, tTimeout:=tTimeOut );
+                Step := Step + 1;
+				fileReadReached40:=TRUE;
+				
+        41:
+                fbFileClose( bExecute := FALSE );
+                IF NOT fbFileClose.bBusy THEN
+					readDataDone:=TRUE;						//////////////////////////////////////////////////////////////////
+                        IF fbFileClose.bError THEN
+                                nErrId := fbFileClose.nErrId;
+                                bError := TRUE;
+                        END_IF
+                        Step := 50;
+                        hSrcFile := 0;
+					ELSE						//////////////////////////////////////////////////////////////////
+						readDataDone:=FALSE;						//////////////////////////////////////////////////////////////////
+                END_IF
+				fileReadReached41:=TRUE;
+
+        50: (* Error or ready => Cleanup *)
+		IF (hSrcFile <> 0 ) THEN
+                        Step := 40; (* Close the source file *)
+         ELSE
+                        Step := 0;      (* Ready *)
+                        bBusy := FALSE;
+         END_IF
+
+END_CASE]]></ST>
+    </Implementation>
+    <LineIds Name="FB_myFileRead">
+      <LineId Id="38" Count="33" />
+      <LineId Id="172" Count="0" />
+      <LineId Id="259" Count="0" />
+      <LineId Id="77" Count="0" />
+      <LineId Id="175" Count="0" />
+      <LineId Id="89" Count="7" />
+      <LineId Id="187" Count="0" />
+      <LineId Id="213" Count="0" />
+      <LineId Id="209" Count="3" />
+      <LineId Id="188" Count="0" />
+      <LineId Id="214" Count="0" />
+      <LineId Id="97" Count="2" />
+      <LineId Id="254" Count="0" />
+      <LineId Id="100" Count="8" />
+      <LineId Id="191" Count="0" />
+      <LineId Id="208" Count="0" />
+      <LineId Id="204" Count="0" />
+      <LineId Id="202" Count="0" />
+      <LineId Id="109" Count="1" />
+      <LineId Id="176" Count="0" />
+      <LineId Id="115" Count="1" />
+      <LineId Id="124" Count="4" />
+      <LineId Id="130" Count="2" />
+      <LineId Id="180" Count="0" />
+      <LineId Id="146" Count="4" />
+      <LineId Id="194" Count="1" />
+      <LineId Id="151" Count="2" />
+      <LineId Id="256" Count="0" />
+      <LineId Id="154" Count="5" />
+      <LineId Id="257" Count="1" />
+      <LineId Id="160" Count="0" />
+      <LineId Id="197" Count="0" />
+      <LineId Id="161" Count="1" />
+      <LineId Id="165" Count="6" />
+      <LineId Id="9" Count="0" />
+    </LineIds>
+  </POU>
+</TcPlcObject>
